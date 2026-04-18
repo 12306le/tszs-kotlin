@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">图色助手</string>
+    <string name="capture_channel_name">截屏服务</string>
+    <string name="overlay_channel_name">悬浮窗服务</string>
+</resources>
