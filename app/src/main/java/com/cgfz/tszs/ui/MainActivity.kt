@@ -20,21 +20,25 @@ import androidx.compose.ui.unit.dp
 import com.cgfz.tszs.capture.ProjectionPermissionRequester
 import com.cgfz.tszs.service.CaptureService
 import com.cgfz.tszs.service.OverlayService
+import android.util.Log
 import org.opencv.android.OpenCVLoader
 
 class MainActivity : ComponentActivity() {
 
     private val projectionPerm = ProjectionPermissionRequester(this)
+    private var opencvOk: Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        OpenCVLoader.initLocal()
+        opencvOk = runCatching { OpenCVLoader.initLocal() }
+            .onFailure { Log.e("tszs", "OpenCV init failed", it) }
+            .getOrDefault(false)
         projectionPerm.register()
 
         setContent {
             MaterialTheme {
                 Scaffold { pad ->
-                    var status by remember { mutableStateOf("未授权") }
+                    var status by remember { mutableStateOf(if (opencvOk) "OpenCV OK" else "OpenCV 加载失败") }
                     Column(Modifier.fillMaxSize().padding(pad).padding(16.dp)) {
                         Text("图色助手 Pro (Kotlin + OpenCV)", style = MaterialTheme.typography.titleLarge)
                         Text("状态: $status")
