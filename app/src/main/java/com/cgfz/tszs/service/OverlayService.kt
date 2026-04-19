@@ -309,10 +309,7 @@ class OverlayService : Service() {
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                // FLAG_SECURE: 让本 overlay 不出现在 MediaProjection 截屏画面中
-                // 这样截屏时悬浮窗不需要隐藏/移除,保持常驻
-                WindowManager.LayoutParams.FLAG_SECURE,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         )
         // 挖孔屏
@@ -361,19 +358,30 @@ class OverlayService : Service() {
     }
 
     private suspend fun performCapture(capturer: com.cgfz.tszs.capture.ScreenCapturer) {
-        // FLAG_SECURE 保证悬浮窗不被 MediaProjection 捕获,
-        // 因此不需要 removeView / 移出屏幕,直接截即可
-        state.setPrompt("截屏中…")
-        canvas?.invalidate()
+        val panel = panelView
+        val lp = panel?.layoutParams as? WindowManager.LayoutParams
+        // 把整个悬浮窗 alpha=0 让它完全透明 → MediaProjection 穿透看到下面的实际屏幕
+        // 不触发 removeView/addView,旋转瞬间不会崩,截完直接恢复 alpha=1
+        if (panel != null && lp != null) {
+            lp.alpha = 0f
+            safeUpdate(panel, lp)
+        }
 
         var bmp: Bitmap? = null
         var err: String? = null
         try {
             bmp = withContext(Dispatchers.IO) {
+                kotlinx.coroutines.delay(100)  // 等 compositor 应用 alpha
                 capturer.captureFreshBitmap(3000L)
             }
         } catch (t: Throwable) {
             err = t.message ?: t.javaClass.simpleName
+        }
+
+        // 恢复可见
+        if (panel != null && lp != null) {
+            lp.alpha = 1f
+            safeUpdate(panel, lp)
         }
 
         if (bmp != null) {
