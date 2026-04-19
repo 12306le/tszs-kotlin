@@ -1,64 +1,105 @@
 package com.cgfz.tszs.ui
 
+import android.Manifest
+import android.content.Context
 import android.content.Intent
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.cgfz.tszs.capture.ProjectionPermissionRequester
+import android.util.Log
 import com.cgfz.tszs.service.CaptureService
 import com.cgfz.tszs.service.OverlayService
-import android.util.Log
 import org.opencv.android.OpenCVLoader
 
 class MainActivity : ComponentActivity() {
 
-    private val projectionPerm = ProjectionPermissionRequester(this)
-    private var opencvOk: Boolean = false
+    private var opencvOk = false
+
+    // 运行时权限(通知)
+    private val runtimePerms = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        Log.i("tszs", "runtime perms = $grants")
+    }
+
+    // 截屏授权
+    private val projectionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { r ->
+        val data = r.data
+        if (r.resultCode == RESULT_OK && data != null) {
+            startCaptureService(r.resultCode, data)
+            startService(Intent(this, OverlayService::class.java))
+            statusText = "截屏 + 悬浮窗已启动"
+        } else {
+            statusText = "截屏授权被拒绝"
+        }
+    }
+
+    private var statusText by mutableStateOf("准备中…")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         opencvOk = runCatching { OpenCVLoader.initLocal() }
             .onFailure { Log.e("tszs", "OpenCV init failed", it) }
             .getOrDefault(false)
-        projectionPerm.register()
+
+        requestRuntimePermissions()
 
         setContent {
             MaterialTheme {
                 Scaffold { pad ->
-                    var status by remember { mutableStateOf(if (opencvOk) "OpenCV OK" else "OpenCV 加载失败") }
-                    Column(Modifier.fillMaxSize().padding(pad).padding(16.dp)) {
+                    Column(
+                        Modifier.fillMaxSize().padding(pad).padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                         Text("图色助手 Pro (Kotlin + OpenCV)", style = MaterialTheme.typography.titleLarge)
-                        Text("状态: $status")
-                        Button(onClick = { requestOverlay() }) { Text("1. 申请悬浮窗权限") }
-                        Button(onClick = {
-                            projectionPerm.request { code, data ->
-                                if (data != null) {
-                                    startCaptureService(code, data)
-                                    status = "截屏服务已启动"
-                                }
-                            }
-                        }) { Text("2. 授权截屏并启动") }
-                        Button(onClick = {
-                            startService(Intent(this@MainActivity, OverlayService::class.java))
-                            status = "悬浮窗已启动"
-                        }) { Text("3. 启动悬浮窗") }
+                        Text("OpenCV: ${if (opencvOk) "OK" else "FAIL"}")
+                        Text("状态: $statusText")
+
+                        Button(onClick = ::onClickStart, modifier = Modifier.fillMaxWidth()) {
+                            Text("一键启动(授权 + 启动悬浮窗)")
+                        }
+                        Button(onClick = { requestOverlay() }, modifier = Modifier.fillMaxWidth()) {
+                            Text("仅申请悬浮窗权限")
+                        }
+                        Button(onClick = ::requestRuntimePermissions, modifier = Modifier.fillMaxWidth()) {
+                            Text("仅申请通知权限")
+                        }
                     }
                 }
             }
         }
+    }
+
+    /** 一键:悬浮窗 → 通知权限 → 截屏授权 → 启动服务 */
+    private fun onClickStart() {
+        if (!Settings.canDrawOverlays(this)) {
+            statusText = "需要悬浮窗权限,请在系统设置里允许后再回来点一次"
+            requestOverlay(); return
+        }
+        requestRuntimePermissions()
+        val mgr = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        projectionLauncher.launch(mgr.createScreenCaptureIntent())
+    }
+
+    private fun requestRuntimePermissions() {
+        val perms = mutableListOf<String>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            perms += Manifest.permission.POST_NOTIFICATIONS
+        }
+        if (perms.isNotEmpty()) runtimePerms.launch(perms.toTypedArray())
     }
 
     private fun requestOverlay() {

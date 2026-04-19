@@ -39,10 +39,16 @@ class ScreenCapturer(
     private val readerThread = HandlerThread("capture-reader").apply { start() }
     private val readerHandler = Handler(readerThread.looper)
 
+    // API 34+ 强制要求的 callback,否则 createVirtualDisplay 会抛 SecurityException
+    private val projectionCallback = object : MediaProjection.Callback() {
+        override fun onStop() { stop() }
+    }
+
     // 复用 Bitmap,避免反复分配
     private var reusableBitmap: Bitmap? = null
 
     fun start() {
+        projection.registerCallback(projectionCallback, readerHandler)
         reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
         display = projection.createVirtualDisplay(
             "tszs-capture",
@@ -128,6 +134,7 @@ class ScreenCapturer(
     fun release() {
         stop()
         readerThread.quitSafely()
+        try { projection.unregisterCallback(projectionCallback) } catch (_: Throwable) {}
         try { projection.stop() } catch (_: Throwable) {}
     }
 
