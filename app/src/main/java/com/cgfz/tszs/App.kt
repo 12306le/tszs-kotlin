@@ -25,13 +25,18 @@ class App : Application() {
     }
 
     private fun writeCrash(t: Thread, e: Throwable) {
-        val dir = getExternalFilesDir(null) ?: filesDir
-        val f = File(dir, "crash.log")
         val sw = StringWriter()
         e.printStackTrace(PrintWriter(sw))
         val header = "\n==== ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())} " +
             "thread=${t.name} ====\n"
-        f.appendText(header + sw.toString())
+        val body = header + sw.toString()
+
+        // 两处都写,内部目录保证能写上,外部方便用户读
+        runCatching { File(filesDir, "crash.log").appendText(body) }
+        runCatching {
+            val ext = getExternalFilesDir(null) ?: return@runCatching
+            File(ext, "crash.log").appendText(body)
+        }
     }
 
     companion object { private const val TAG = "tszs-app" }

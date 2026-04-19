@@ -1,6 +1,7 @@
 package com.cgfz.tszs.capture
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import androidx.activity.result.ActivityResultLauncher
@@ -9,14 +10,13 @@ import androidx.activity.ComponentActivity
 
 /**
  * 用户授权 MediaProjection 的一次性请求封装。
- * 使用方式:Activity 里调用 register(...),然后 request(),
- * 授权成功后会把 resultCode + Intent 交给回调。
+ * 注意:mgr 必须 lazy,getSystemService 在 Activity onCreate 之前调用会抛 ISE。
  */
 class ProjectionPermissionRequester(private val activity: ComponentActivity) {
 
-    private val mgr: MediaProjectionManager = activity.getSystemService(
-        Activity.MEDIA_PROJECTION_SERVICE
-    ) as MediaProjectionManager
+    private val mgr: MediaProjectionManager by lazy {
+        activity.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+    }
 
     private var onResult: ((Int, Intent?) -> Unit)? = null
     private lateinit var launcher: ActivityResultLauncher<Intent>
