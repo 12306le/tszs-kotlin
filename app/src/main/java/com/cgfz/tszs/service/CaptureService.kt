@@ -52,10 +52,21 @@ class CaptureService : Service() {
         if (capturer != null) return   // 已就绪,避免重复创建
         val mgr = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         val projection = mgr.getMediaProjection(resultCode, data) ?: return
-        val metrics = DisplayMetrics().also {
-            (getSystemService(WINDOW_SERVICE) as WindowManager).defaultDisplay.getRealMetrics(it)
-        }
-        capturer = ScreenCapturer(projection, metrics).apply { start() }
+        capturer = ScreenCapturer(projection, currentRealMetrics()).apply { start() }
+    }
+
+    /** 旋转时调用,按新屏幕尺寸重建 VirtualDisplay */
+    fun onOrientationChanged() {
+        capturer?.resizeTo(currentRealMetrics())
+    }
+
+    private fun currentRealMetrics(): DisplayMetrics = DisplayMetrics().also {
+        (getSystemService(WINDOW_SERVICE) as WindowManager).defaultDisplay.getRealMetrics(it)
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        onOrientationChanged()
     }
 
     private fun startForegroundCompat() {

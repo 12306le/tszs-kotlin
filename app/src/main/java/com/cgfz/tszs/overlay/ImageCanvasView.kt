@@ -58,6 +58,17 @@ class ImageCanvasView @JvmOverloads constructor(
             state.pointerY1 = h / 2f - 100
             state.pointerX2 = w / 2f + 100
             state.pointerY2 = h / 2f + 100
+        } else if (w != oldw || h != oldh) {
+            // 旋转 / resize:按比例缩放指针位置,保持相对位置
+            val sx = if (oldw > 0) w.toFloat() / oldw else 1f
+            val sy = if (oldh > 0) h.toFloat() / oldh else 1f
+            state.pointerFocusX *= sx; state.pointerFocusY *= sy
+            state.pointerX1 *= sx; state.pointerY1 *= sy
+            state.pointerX2 *= sx; state.pointerY2 *= sy
+        }
+        // 有图片时重新居中缩放,保证旋转后图片不错位
+        if (state.currentImage != null && w > 0 && h > 0) {
+            state.applyZoom(w / 2f, h / 2f, state.ratio)
         }
     }
 

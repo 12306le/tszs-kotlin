@@ -27,11 +27,11 @@ import org.opencv.core.Mat
  */
 class ScreenCapturer(
     private val projection: MediaProjection,
-    metrics: DisplayMetrics,
+    initialMetrics: DisplayMetrics,
 ) {
-    private val width = metrics.widthPixels
-    private val height = metrics.heightPixels
-    private val density = metrics.densityDpi
+    @Volatile private var width = initialMetrics.widthPixels
+    @Volatile private var height = initialMetrics.heightPixels
+    @Volatile private var density = initialMetrics.densityDpi
 
     private var reader: ImageReader? = null
     private var display: VirtualDisplay? = null
@@ -50,6 +50,25 @@ class ScreenCapturer(
 
     fun start() {
         projection.registerCallback(projectionCallback, readerHandler)
+        rebuildTarget()
+    }
+
+    /** 旋转或面板显示区域变化时重新建立 VirtualDisplay 和 ImageReader */
+    fun resizeTo(newMetrics: DisplayMetrics) {
+        width = newMetrics.widthPixels
+        height = newMetrics.heightPixels
+        density = newMetrics.densityDpi
+        rebuildTarget()
+    }
+
+    private fun rebuildTarget() {
+        try { display?.release() } catch (_: Throwable) {}
+        try { reader?.close() } catch (_: Throwable) {}
+        synchronized(frameLock) {
+            latestBitmap?.recycle()
+            latestBitmap = null
+            frameCount = 0L
+        }
         val r = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
         reader = r
         r.setOnImageAvailableListener({ rd ->

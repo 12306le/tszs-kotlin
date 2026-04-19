@@ -25,14 +25,10 @@ class MainActivity : ComponentActivity() {
 
     private var opencvOk = false
 
-    // 运行时权限(通知)
     private val runtimePerms = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { grants ->
-        Log.i("tszs", "runtime perms = $grants")
-    }
+    ) { grants -> Log.i("tszs", "runtime perms = $grants") }
 
-    // 截屏授权
     private val projectionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { r ->
@@ -57,16 +53,37 @@ class MainActivity : ComponentActivity() {
 
         requestRuntimePermissions()
 
+        val prefs = getSharedPreferences("tszs_prefs", MODE_PRIVATE)
+
         setContent {
             MaterialTheme {
                 Scaffold { pad ->
+                    var panelPct by remember { mutableIntStateOf(prefs.getInt("panel_pct", 80)) }
                     Column(
                         Modifier.fillMaxSize().padding(pad).padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text("图色助手 Pro (Kotlin + OpenCV)", style = MaterialTheme.typography.titleLarge)
+                        Text("图色助手 Pro", style = MaterialTheme.typography.titleLarge)
+                        Text("(Kotlin + OpenCV 重构)")
                         Text("OpenCV: ${if (opencvOk) "OK" else "FAIL"}")
                         Text("状态: $statusText")
+
+                        Spacer(Modifier.height(8.dp))
+
+                        // 面板尺寸滑块
+                        Text("悬浮窗面板尺寸: ${panelPct}%")
+                        Slider(
+                            value = panelPct.toFloat(),
+                            onValueChange = { panelPct = it.toInt() },
+                            onValueChangeFinished = {
+                                prefs.edit().putInt("panel_pct", panelPct).apply()
+                            },
+                            valueRange = 50f..100f,
+                            steps = 49
+                        )
+                        Text("拖动后重启悬浮窗(点一键启动)生效", style = MaterialTheme.typography.bodySmall)
+
+                        Spacer(Modifier.height(8.dp))
 
                         Button(onClick = ::onClickStart, modifier = Modifier.fillMaxWidth()) {
                             Text("一键启动(授权 + 启动悬浮窗)")
@@ -74,8 +91,11 @@ class MainActivity : ComponentActivity() {
                         Button(onClick = { requestOverlay() }, modifier = Modifier.fillMaxWidth()) {
                             Text("仅申请悬浮窗权限")
                         }
-                        Button(onClick = ::requestRuntimePermissions, modifier = Modifier.fillMaxWidth()) {
-                            Text("仅申请通知权限")
+                        Button(
+                            onClick = { stopService(Intent(this@MainActivity, OverlayService::class.java)) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("停止悬浮窗")
                         }
                     }
                 }
@@ -83,7 +103,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** 一键:悬浮窗 → 通知权限 → 截屏授权 → 启动服务 */
     private fun onClickStart() {
         if (!Settings.canDrawOverlays(this)) {
             statusText = "需要悬浮窗权限,请在系统设置里允许后再回来点一次"

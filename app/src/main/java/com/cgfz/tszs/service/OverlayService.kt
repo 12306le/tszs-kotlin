@@ -92,6 +92,46 @@ class OverlayService : Service() {
         main.post(ticker)
     }
 
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // 通知截屏服务重建 VirtualDisplay 匹配新尺寸
+        CaptureService.instance?.onOrientationChanged()
+        // 展开状态需要重新按新尺寸摆放面板,否则可能超出屏幕
+        if (expanded) {
+            val oldX = (panelView?.layoutParams as? WindowManager.LayoutParams)?.x ?: 0
+            val oldY = (panelView?.layoutParams as? WindowManager.LayoutParams)?.y ?: 0
+            panelView?.let { runCatching { wm.removeView(it) } }
+            panelView = null; canvas = null
+            rebuildPanel(oldX, oldY)
+        } else {
+            // 小圆点也确保留在屏幕内
+            val hv = handleView ?: return
+            val lp = hv.layoutParams as WindowManager.LayoutParams
+            val dm = resources.displayMetrics
+            lp.x = lp.x.coerceIn(0, dm.widthPixels - hv.width.coerceAtLeast(44))
+            lp.y = lp.y.coerceIn(0, dm.heightPixels - hv.height.coerceAtLeast(44))
+            runCatching { wm.updateViewLayout(hv, lp) }
+        }
+    }
+
+    private fun panelSize(): Pair<Int, Int> {
+        val dm = resources.displayMetrics
+        val w = dm.widthPixels; val h = dm.heightPixels
+        // 读取用户偏好比例:50..100(对应基准的百分比,默认 80)
+        val pct = getSharedPreferences("tszs_prefs", MODE_PRIVATE).getInt("panel_pct", 80) / 100f
+        return if (w <= h) {
+            // 竖屏:宽=屏幕宽×pct,高=宽×0.95(保持近正方形)
+            val pw = (w * pct).toInt()
+            val ph = (pw * 0.95f).toInt().coerceAtMost((h * 0.85f).toInt())
+            pw to ph
+        } else {
+            // 横屏:高=屏幕高×pct,宽=高×1.5,夹到屏幕宽内
+            val ph = (h * pct).toInt()
+            val pw = (ph * 1.5f).toInt().coerceAtMost((w * 0.95f).toInt())
+            pw to ph
+        }
+    }
+
     // ================ 悬浮窗展开/收起 ================
     private fun showHandle() {
         val v = LayoutInflater.from(this).inflate(R.layout.overlay_handle, null, false)
@@ -112,10 +152,8 @@ class OverlayService : Service() {
         canvas = v.findViewById(R.id.canvas)
         canvas!!.state = state
 
-        // 画布尺寸:占屏幕宽 95%,宽:高 = 宽度 * 0.9
+        val (pw, ph) = panelSize()
         val dm = resources.displayMetrics
-        val pw = (dm.widthPixels * 0.96).toInt()
-        val ph = (dm.widthPixels * 0.95).toInt()
 
         val lp = makeLP(pw, ph)
         lp.gravity = Gravity.TOP or Gravity.START
@@ -250,15 +288,27 @@ class OverlayService : Service() {
         }
     }
 
-    private fun makeLP(w: Int, h: Int) = WindowManager.LayoutParams(
-        w, h,
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        else WindowManager.LayoutParams.TYPE_PHONE,
-        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-        PixelFormat.TRANSLUCENT
-    )
+    private fun makeLP(w: Int, h: Int): WindowManager.LayoutParams {
+        val lp = WindowManager.LayoutParams(
+            w, h,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        )
+        // 挖孔屏:让窗口延伸到 cutout 区域,与 MediaProjection 的物理坐标对齐
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            lp.layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            lp.layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
+        return lp
+    }
 
     // ================ 动作 ================
     private fun onCapture() {
@@ -322,9 +372,8 @@ class OverlayService : Service() {
 
     /** 重新 inflate 并 addView 主面板(因为 onCapture 中 remove 了) */
     private fun rebuildPanel(x: Int, y: Int) {
+        val (pw, ph) = panelSize()
         val dm = resources.displayMetrics
-        val pw = (dm.widthPixels * 0.96).toInt()
-        val ph = (dm.widthPixels * 0.95).toInt()
         val v = LayoutInflater.from(this).inflate(R.layout.overlay_main, null, false)
         panelView = v
         canvas = v.findViewById(R.id.canvas)
