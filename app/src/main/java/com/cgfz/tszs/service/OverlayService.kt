@@ -534,7 +534,8 @@ class OverlayService : Service() {
                         val r = ImageOps.findMultiColors(mat, base.color, offsets, 4)
                         val ms = System.currentTimeMillis() - t0
                         if (r == null) "多点找色失败" else {
-                            withContext(Dispatchers.Main) { locate(r.x, r.y) }
+                            // 找色:基准点对齐到指针圆
+                            withContext(Dispatchers.Main) { locate(r.x, r.y, Anchor.POINTER_FOCUS) }
                             "多点找色:(${r.x},${r.y}) ${ms}ms"
                         }
                     } else {
@@ -557,20 +558,32 @@ class OverlayService : Service() {
                 mat.release(); tmpl.release()
                 withContext(Dispatchers.Main) {
                     if (r == null) state.setPrompt("没找到图片(${ms}ms)")
-                    else { locate(r.x, r.y); state.setPrompt("找到图片:(${r.x},${r.y}) ${ms}ms") }
+                    else {
+                        // 找图:结果是小图左上角,对齐到 pointer 框左上角,
+                        // 这样 pointer 框能完整包住命中区域
+                        locate(r.x, r.y, Anchor.POINTER_TOP_LEFT)
+                        state.setPrompt("找到图片:(${r.x},${r.y}) ${ms}ms")
+                    }
                     canvas?.invalidate()
                 }
             }
         }
     }
 
-    private fun locate(imgX: Int, imgY: Int) {
+    private fun locate(imgX: Int, imgY: Int, anchor: Anchor) {
         val img = state.currentImage ?: return
-        state.deviationX = imgX + 0.5f - img.width / 2f
-        state.deviationY = imgY + 0.5f - img.height / 2f
-        // 用指针焦点作为锚点(和原 JS 一致),让找到的位置对齐到指针处
-        state.applyZoom(state.pointerFocusX, state.pointerFocusY, state.ratio)
+        // 让 bitmap 上 (imgX, imgY) 对齐到指定 canvas 锚点
+        // 推导:imgTopX + imgX*ratio = anchorX
+        //      => deviationX = imgX - img.width/2
+        state.deviationX = imgX - img.width / 2f
+        state.deviationY = imgY - img.height / 2f
+        val (ax, ay) = when (anchor) {
+            Anchor.POINTER_FOCUS -> state.pointerFocusX to state.pointerFocusY
+            Anchor.POINTER_TOP_LEFT -> state.pointerX1 to state.pointerY1
+        }
+        state.applyZoom(ax, ay, state.ratio)
     }
+    private enum class Anchor { POINTER_FOCUS, POINTER_TOP_LEFT }
 
     private fun onSave() {
         if (state.mode == OverlayState.Mode.GET_COLOR) {
@@ -689,21 +702,40 @@ class OverlayService : Service() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val ch = "tszs_overlay"
         if (nm.getNotificationChannel(ch) == null) {
+            // 用 DEFAULT importance,国产系统(MIUI/EMUI)不会把它当作低优先级杀掉
             nm.createNotificationChannel(
-                NotificationChannel(ch, "悬浮窗", NotificationManager.IMPORTANCE_LOW)
+                NotificationChannel(ch, "悬浮窗", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                    setShowBadge(false)
+                    enableLights(false)
+                    enableVibration(false)
+                    setSound(null, null)
+                }
+            )
+        }
+        // 开启 app 的 Intent(用户点通知回到主界面)
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+        val pi = launchIntent?.let {
+            android.app.PendingIntent.getActivity(
+                this, 0, it,
+                android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
             )
         }
         val n: Notification = Notification.Builder(this, ch)
-            .setContentTitle("图色助手")
-            .setContentText("悬浮窗运行中")
+            .setContentTitle("图色助手 运行中")
+            .setContentText("点击返回主界面")
             .setSmallIcon(android.R.drawable.ic_menu_view)
             .setOngoing(true)
+            .setContentIntent(pi)
             .build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(1002, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
             startForeground(1002, n)
         }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        return START_STICKY   // 被系统杀后自动重启
     }
 
     override fun onDestroy() {

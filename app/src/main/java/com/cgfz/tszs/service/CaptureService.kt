@@ -45,7 +45,7 @@ class CaptureService : Service() {
         val data = intent?.getParcelableExtra<Intent>(EXTRA_DATA)
         if (code != 0 && data != null) startCapture(code, data)
         instance = this
-        return START_NOT_STICKY
+        return START_STICKY   // 杀后可恢复(虽然 projection token 会失效,至少 service 对象在)
     }
 
     private fun startCapture(resultCode: Int, data: Intent) {
@@ -73,12 +73,17 @@ class CaptureService : Service() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (nm.getNotificationChannel(CHANNEL_ID) == null) {
             nm.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "截屏服务", NotificationManager.IMPORTANCE_LOW)
+                NotificationChannel(CHANNEL_ID, "截屏服务", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                    setShowBadge(false)
+                    enableLights(false)
+                    enableVibration(false)
+                    setSound(null, null)
+                }
             )
         }
         val n: Notification = Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("图色助手")
-            .setContentText("截屏服务运行中")
+            .setContentTitle("图色助手 截屏服务")
+            .setContentText("提供截屏能力,点击返回主界面")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setOngoing(true)
             .build()
