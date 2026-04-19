@@ -50,56 +50,71 @@ class ScreenCapturer(
 
     fun start() {
         projection.registerCallback(projectionCallback, readerHandler)
-        rebuildTarget()
+        val r = buildReader(width, height)
+        reader = r
+        display = projection.createVirtualDisplay(
+            "tszs-capture",
+            width, height, density,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+            r.surface, null, readerHandler
+        )
     }
 
-    /** 旋转或面板显示区域变化时重新建立 VirtualDisplay 和 ImageReader */
+    /**
+     * 旋转时调用。关键:**不重建 VirtualDisplay**,只替换 ImageReader 的 surface。
+     * 这样 MediaProjection 对象保持活着,不会触发系统 stop,用户无需重新授权。
+     * 这是 AutoJs 等开源项目处理旋转的标准做法。
+     */
     fun resizeTo(newMetrics: DisplayMetrics) {
-        width = newMetrics.widthPixels
-        height = newMetrics.heightPixels
-        density = newMetrics.densityDpi
-        rebuildTarget()
-    }
+        val newW = newMetrics.widthPixels
+        val newH = newMetrics.heightPixels
+        val newDensity = newMetrics.densityDpi
+        if (newW == width && newH == height && newDensity == density) return
 
-    private fun rebuildTarget() {
-        try { display?.release() } catch (_: Throwable) {}
-        try { reader?.close() } catch (_: Throwable) {}
+        val oldReader = reader
+        val newReader = buildReader(newW, newH)
+
+        try {
+            // 切换 VirtualDisplay 的 surface,然后 resize(API 20+,token 保持)
+            display?.surface = newReader.surface
+            display?.resize(newW, newH, newDensity)
+        } catch (t: Throwable) {
+            Log.e(TAG, "resize virtual display failed", t)
+            try { newReader.close() } catch (_: Throwable) {}
+            return
+        }
+
+        reader = newReader
+        width = newW; height = newH; density = newDensity
         synchronized(frameLock) {
             latestBitmap?.recycle()
             latestBitmap = null
             frameCount = 0L
         }
-        try {
-            val r = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
-            reader = r
-            r.setOnImageAvailableListener({ rd ->
-                val image: Image = rd.acquireLatestImage() ?: return@setOnImageAvailableListener
-                try {
-                    val bmp = imageToIndependentBitmap(image)
-                    synchronized(frameLock) {
-                        latestBitmap?.recycle()
-                        latestBitmap = bmp
-                        frameCount++
-                    }
-                } catch (t: Throwable) {
-                    Log.e(TAG, "consume image failed", t)
-                } finally {
-                    image.close()
+        // 延迟关旧 reader,防止还有 in-flight 帧读它
+        readerHandler.postDelayed({
+            try { oldReader?.close() } catch (_: Throwable) {}
+        }, 500L)
+    }
+
+    private fun buildReader(w: Int, h: Int): ImageReader {
+        val r = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 2)
+        r.setOnImageAvailableListener({ rd ->
+            val image: Image = rd.acquireLatestImage() ?: return@setOnImageAvailableListener
+            try {
+                val bmp = imageToIndependentBitmap(image, w)
+                synchronized(frameLock) {
+                    latestBitmap?.recycle()
+                    latestBitmap = bmp
+                    frameCount++
                 }
-            }, readerHandler)
-            display = projection.createVirtualDisplay(
-                "tszs-capture",
-                width, height, density,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                r.surface, null, readerHandler
-            )
-        } catch (t: Throwable) {
-            // projection 可能已被系统 stop,createVirtualDisplay 会抛 IllegalStateException
-            // 不要让它冒泡到 service.onConfigurationChanged 导致进程崩溃
-            Log.e(TAG, "rebuildTarget failed (projection may be stopped)", t)
-            reader = null
-            display = null
-        }
+            } catch (t: Throwable) {
+                Log.e(TAG, "consume image failed", t)
+            } finally {
+                image.close()
+            }
+        }, readerHandler)
+        return r
     }
 
     /** 阻塞获取最新帧的副本。缺省 3s 超时。 */
@@ -132,19 +147,19 @@ class ScreenCapturer(
         return mat
     }
 
-    private fun imageToIndependentBitmap(image: Image): Bitmap {
+    private fun imageToIndependentBitmap(image: Image, expectedWidth: Int = width): Bitmap {
         val plane = image.planes[0]
         val buffer = plane.buffer
         val pixelStride = plane.pixelStride
         val rowStride = plane.rowStride
-        val rowPadding = rowStride - pixelStride * width
-        val realWidth = width + rowPadding / pixelStride
-        val raw = Bitmap.createBitmap(realWidth, height, Bitmap.Config.ARGB_8888)
+        val rowPadding = rowStride - pixelStride * expectedWidth
+        val realWidth = expectedWidth + rowPadding / pixelStride
+        val raw = Bitmap.createBitmap(realWidth, image.height, Bitmap.Config.ARGB_8888)
         buffer.rewind()
         raw.copyPixelsFromBuffer(buffer)
         return if (rowPadding == 0) raw
         else {
-            val cropped = Bitmap.createBitmap(raw, 0, 0, width, height)
+            val cropped = Bitmap.createBitmap(raw, 0, 0, expectedWidth, image.height)
             raw.recycle()
             cropped
         }
