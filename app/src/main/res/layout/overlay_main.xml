@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+悬浮窗主面板:
+  粉色圆角底 + 标题栏(小圆点+标题+7 顶部功能)
+  下方大画布区 FrameLayout:
+    - ImageCanvasView 铺满
+    - 左侧图片槽位列表(overlay)
+    - 右侧侧边按钮 + 可展开面板
+    - 底部缩放条(overlay)
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/panel_root"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/bg_panel"
+    android:padding="2dp">
+
+    <!-- ================ 标题栏 ================ -->
+    <LinearLayout
+        android:id="@+id/title_bar"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <!-- 左上小圆点(拖动/收起) -->
+        <ImageView
+            android:id="@+id/window_operate"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:src="@drawable/ic_tilt_shift"
+            android:scaleType="centerInside"
+            android:contentDescription="handle"/>
+
+        <TextView
+            android:id="@+id/title_text"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="图色助手Pro Max"
+            android:textColor="@color/tszs_yellow"
+            android:textSize="14sp"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"/>
+
+        <!-- 7 个顶部功能图标 -->
+        <LinearLayout
+            android:id="@+id/top_actions"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:orientation="horizontal">
+
+            <ImageView android:id="@+id/act_upload" style="@style/TopIcon" android:src="@drawable/ic_upload"/>
+            <ImageView android:id="@+id/act_download" style="@style/TopIcon" android:src="@drawable/ic_download"/>
+            <ImageView android:id="@+id/act_binarize" style="@style/TopIcon" android:src="@drawable/ic_exposure"/>
+            <ImageView android:id="@+id/act_resize" style="@style/TopIcon" android:src="@drawable/ic_wallpaper"/>
+            <ImageView android:id="@+id/act_capture" style="@style/TopIcon" android:src="@drawable/ic_camera"/>
+            <ImageView android:id="@+id/act_remove" style="@style/TopIcon" android:src="@drawable/ic_remove"/>
+            <ImageView android:id="@+id/act_exit" style="@style/TopIcon" android:src="@drawable/ic_close"/>
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- ================ 画布区 ================ -->
+    <FrameLayout
+        android:id="@+id/stage"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_marginTop="2dp">
+
+        <com.cgfz.tszs.overlay.ImageCanvasView
+            android:id="@+id/canvas"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"/>
+
+        <!-- 左侧图片槽列表(垂直) -->
+        <LinearLayout
+            android:id="@+id/img_slot_list"
+            android:layout_width="28dp"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:background="@color/tszs_dim_black"
+            android:layout_marginBottom="22dp"/>
+
+        <!-- 右侧组合 -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:layout_gravity="end"
+            android:orientation="horizontal"
+            android:layout_marginBottom="22dp">
+
+            <!-- 右侧可展开面板 -->
+            <FrameLayout
+                android:id="@+id/right_panel"
+                android:layout_width="180dp"
+                android:layout_height="match_parent"
+                android:visibility="gone">
+
+                <!-- 颜色记录(取色模式) -->
+                <LinearLayout
+                    android:id="@+id/color_record"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="28dp"
+                        android:orientation="horizontal"
+                        android:background="@color/tszs_dim_black"
+                        android:gravity="center_vertical"
+                        android:paddingStart="6dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="颜色记录"
+                            android:textColor="@color/tszs_yellow"
+                            android:textSize="12sp"/>
+
+                        <TextView
+                            android:id="@+id/btn_clear_colors"
+                            android:layout_width="wrap_content"
+                            android:layout_height="match_parent"
+                            android:background="@color/tszs_yellow"
+                            android:gravity="center"
+                            android:text="清空"
+                            android:textColor="#FFFF0000"
+                            android:textSize="12sp"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="8dp"/>
+                    </LinearLayout>
+
+                    <androidx.recyclerview.widget.RecyclerView
+                        android:id="@+id/color_list"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@color/tszs_slot_inactive"/>
+                </LinearLayout>
+
+                <!-- 图片记录(取图模式) -->
+                <LinearLayout
+                    android:id="@+id/small_img_record"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="28dp"
+                        android:background="@color/tszs_dim_black"
+                        android:gravity="center_vertical"
+                        android:paddingStart="6dp"
+                        android:text="图片记录"
+                        android:textColor="@color/tszs_yellow"
+                        android:textSize="12sp"/>
+
+                    <ImageView
+                        android:id="@+id/small_img"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@color/tszs_slot_inactive"
+                        android:scaleType="fitCenter"/>
+                </LinearLayout>
+            </FrameLayout>
+
+            <!-- 侧边按钮列 -->
+            <LinearLayout
+                android:layout_width="28dp"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:background="@color/tszs_dim_black">
+
+                <ImageView android:id="@+id/opt_toggle_panel" style="@style/SideIcon" android:src="@drawable/ic_assignment"/>
+                <ImageView android:id="@+id/opt_mode" style="@style/SideIcon" android:src="@drawable/ic_colorize"/>
+                <ImageView android:id="@+id/opt_pick" style="@style/SideIcon" android:src="@drawable/ic_check"/>
+                <ImageView android:id="@+id/opt_test" style="@style/SideIcon" android:src="@drawable/ic_target"/>
+                <ImageView android:id="@+id/opt_save" style="@style/SideIcon" android:src="@drawable/ic_folder_plus"/>
+                <ImageView android:id="@+id/opt_copy" style="@style/SideIcon" android:src="@drawable/ic_layers"/>
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 底部缩放条 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="22dp"
+            android:layout_gravity="bottom"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@color/tszs_dim_black"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp">
+
+            <TextView
+                android:id="@+id/ratio_text"
+                android:layout_width="48dp"
+                android:layout_height="wrap_content"
+                android:text="0.30X"
+                android:textColor="@color/tszs_yellow"
+                android:textSize="11sp"/>
+
+            <SeekBar
+                android:id="@+id/zoom_bar"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:max="500"
+                android:progress="0"/>
+        </LinearLayout>
+    </FrameLayout>
+</LinearLayout>

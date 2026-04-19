@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="tszs_pink">#FF6789</color>
+    <color name="tszs_yellow">#FFE785</color>
+    <color name="tszs_canvas_bg">#FAC8AA</color>
+    <color name="tszs_dim_black">#60000000</color>
+    <color name="tszs_dim_black_strong">#88000000</color>
+    <color name="tszs_slot_inactive">#30000000</color>
+    <color name="tszs_info_bg">#CC000000</color>
+</resources>
