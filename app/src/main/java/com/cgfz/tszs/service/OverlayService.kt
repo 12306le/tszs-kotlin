@@ -94,6 +94,12 @@ class OverlayService : Service() {
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
+        // 整个方法包 runCatching,绝不让异常冒泡到系统 → 进程杀
+        runCatching { handleOrientationChange() }
+            .onFailure { android.util.Log.e("tszs", "overlay configChanged failed", it) }
+    }
+
+    private fun handleOrientationChange() {
         runCatching { CaptureService.instance?.onOrientationChanged() }
         // 温和处理:只调整现有 window 的尺寸和位置到新屏幕范围内,不重建
         val dm = resources.displayMetrics

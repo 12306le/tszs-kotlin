@@ -69,29 +69,37 @@ class ScreenCapturer(
             latestBitmap = null
             frameCount = 0L
         }
-        val r = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
-        reader = r
-        r.setOnImageAvailableListener({ rd ->
-            val image: Image = rd.acquireLatestImage() ?: return@setOnImageAvailableListener
-            try {
-                val bmp = imageToIndependentBitmap(image)
-                synchronized(frameLock) {
-                    latestBitmap?.recycle()
-                    latestBitmap = bmp
-                    frameCount++
+        try {
+            val r = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
+            reader = r
+            r.setOnImageAvailableListener({ rd ->
+                val image: Image = rd.acquireLatestImage() ?: return@setOnImageAvailableListener
+                try {
+                    val bmp = imageToIndependentBitmap(image)
+                    synchronized(frameLock) {
+                        latestBitmap?.recycle()
+                        latestBitmap = bmp
+                        frameCount++
+                    }
+                } catch (t: Throwable) {
+                    Log.e(TAG, "consume image failed", t)
+                } finally {
+                    image.close()
                 }
-            } catch (t: Throwable) {
-                Log.e(TAG, "consume image failed", t)
-            } finally {
-                image.close()
-            }
-        }, readerHandler)
-        display = projection.createVirtualDisplay(
-            "tszs-capture",
-            width, height, density,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            r.surface, null, readerHandler
-        )
+            }, readerHandler)
+            display = projection.createVirtualDisplay(
+                "tszs-capture",
+                width, height, density,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                r.surface, null, readerHandler
+            )
+        } catch (t: Throwable) {
+            // projection 可能已被系统 stop,createVirtualDisplay 会抛 IllegalStateException
+            // 不要让它冒泡到 service.onConfigurationChanged 导致进程崩溃
+            Log.e(TAG, "rebuildTarget failed (projection may be stopped)", t)
+            reader = null
+            display = null
+        }
     }
 
     /** 阻塞获取最新帧的副本。缺省 3s 超时。 */

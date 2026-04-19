@@ -66,7 +66,9 @@ class CaptureService : Service() {
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
-        onOrientationChanged()
+        // 不要让 projection stop 引发的异常冒泡,导致进程被杀
+        runCatching { onOrientationChanged() }
+            .onFailure { android.util.Log.e("tszs", "capture configChanged failed", it) }
     }
 
     private fun startForegroundCompat() {
