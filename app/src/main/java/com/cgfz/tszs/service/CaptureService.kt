@@ -49,6 +49,7 @@ class CaptureService : Service() {
     }
 
     private fun startCapture(resultCode: Int, data: Intent) {
+        if (capturer != null) return   // 已就绪,避免重复创建
         val mgr = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         val projection = mgr.getMediaProjection(resultCode, data) ?: return
         val metrics = DisplayMetrics().also {

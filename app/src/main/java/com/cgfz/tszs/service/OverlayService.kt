@@ -65,7 +65,7 @@ class OverlayService : Service() {
     private val ticker = object : Runnable {
         override fun run() {
             canvas?.invalidate()
-            main.postDelayed(this, 100L)
+            main.postDelayed(this, 250L)
         }
     }
 
@@ -166,9 +166,10 @@ class OverlayService : Service() {
                 if (!fromUser) return
                 val r = state.computeRatioFromSeek(p)
                 ratioText.text = "%.2fX".format(r)
-                state.currentImage?.let {
-                    state.applyZoom(canvas!!.width / 2f, canvas!!.height / 2f, r)
-                    canvas?.invalidate()
+                val cv = canvas ?: return
+                if (state.currentImage != null) {
+                    state.applyZoom(cv.width / 2f, cv.height / 2f, r)
+                    cv.invalidate()
                 }
             }
             override fun onStartTrackingTouch(sb: SeekBar) {}
@@ -261,35 +262,79 @@ class OverlayService : Service() {
 
     // ================ 动作 ================
     private fun onCapture() {
-        val capturer = CaptureService.instance?.capturer
-        if (capturer == null) {
-            state.setPrompt("截屏服务未就绪,先在主界面授权")
-            toast("截屏服务未就绪,请先在主界面授权"); return
-        }
-        // 隐藏面板截图 → 还原
-        panelView?.visibility = View.INVISIBLE
         scope.launch {
-            try {
-                val bmp = withContext(Dispatchers.IO) {
-                    kotlinx.coroutines.delay(120)  // 等面板真正消失
-                    capturer.captureBitmap().copy(Bitmap.Config.ARGB_8888, true)
-                }
-                state.acceptCapture(bmp)
-                // 初始 ratio 0.3 居中
-                canvas?.let {
-                    state.applyZoom(it.width / 2f, it.height / 2f, 0.30f)
+            val capturer = awaitCapturer(2000)
+            if (capturer == null) {
+                state.setPrompt("截屏服务未就绪,请回主界面重新授权")
+                toast("请回主界面重新授权截屏"); return@launch
+            }
+            performCapture(capturer)
+        }
+    }
+
+    private suspend fun awaitCapturer(timeoutMs: Long): com.cgfz.tszs.capture.ScreenCapturer? {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            val c = CaptureService.instance?.capturer
+            if (c != null) return c
+            kotlinx.coroutines.delay(100)
+        }
+        return null
+    }
+
+    private suspend fun performCapture(capturer: com.cgfz.tszs.capture.ScreenCapturer) {
+        val panel = panelView ?: return
+        val lp = panel.layoutParams as WindowManager.LayoutParams
+        val savedX = lp.x; val savedY = lp.y
+
+        runCatching { wm.removeView(panel) }
+        panelView = null; canvas = null
+
+        var bmp: Bitmap? = null
+        var err: String? = null
+        try {
+            bmp = withContext(Dispatchers.IO) {
+                kotlinx.coroutines.delay(180)
+                capturer.captureFreshBitmap(3000L)
+            }
+        } catch (t: Throwable) {
+            err = t.message ?: t.javaClass.simpleName
+        }
+
+        rebuildPanel(savedX, savedY)
+
+        if (bmp != null) {
+            state.acceptCapture(bmp)
+            canvas?.let { cv ->
+                cv.post {
+                    state.applyZoom(cv.width / 2f, cv.height / 2f, 0.30f)
                     zoomBar.progress = 0
                     ratioText.text = "0.30X"
+                    cv.invalidate()
                 }
-                refreshSlots()
-                state.setPrompt("截屏完成")
-            } catch (t: Throwable) {
-                state.setPrompt("截屏失败:${t.message}")
-            } finally {
-                panelView?.visibility = View.VISIBLE
-                canvas?.invalidate()
             }
+            refreshSlots()
+            state.setPrompt("截屏完成 ${bmp.width}×${bmp.height}")
+        } else {
+            state.setPrompt("截屏失败:$err")
         }
+    }
+
+    /** 重新 inflate 并 addView 主面板(因为 onCapture 中 remove 了) */
+    private fun rebuildPanel(x: Int, y: Int) {
+        val dm = resources.displayMetrics
+        val pw = (dm.widthPixels * 0.96).toInt()
+        val ph = (dm.widthPixels * 0.95).toInt()
+        val v = LayoutInflater.from(this).inflate(R.layout.overlay_main, null, false)
+        panelView = v
+        canvas = v.findViewById(R.id.canvas)
+        canvas!!.state = state
+        val lp = makeLP(pw, ph)
+        lp.gravity = Gravity.TOP or Gravity.START
+        lp.x = x.coerceAtMost(dm.widthPixels - pw).coerceAtLeast(0)
+        lp.y = y.coerceAtMost(dm.heightPixels - ph).coerceAtLeast(0)
+        bindPanel(v, lp)
+        wm.addView(v, lp)
     }
 
     private fun onRemove() {
