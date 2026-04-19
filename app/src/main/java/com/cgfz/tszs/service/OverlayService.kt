@@ -94,23 +94,25 @@ class OverlayService : Service() {
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
-        // 通知截屏服务重建 VirtualDisplay 匹配新尺寸
-        CaptureService.instance?.onOrientationChanged()
-        // 展开状态需要重新按新尺寸摆放面板,否则可能超出屏幕
+        runCatching { CaptureService.instance?.onOrientationChanged() }
+        // 温和处理:只调整现有 window 的尺寸和位置到新屏幕范围内,不重建
+        val dm = resources.displayMetrics
         if (expanded) {
-            val oldX = (panelView?.layoutParams as? WindowManager.LayoutParams)?.x ?: 0
-            val oldY = (panelView?.layoutParams as? WindowManager.LayoutParams)?.y ?: 0
-            panelView?.let { runCatching { wm.removeView(it) } }
-            panelView = null; canvas = null
-            rebuildPanel(oldX, oldY)
+            val v = panelView ?: return
+            val lp = v.layoutParams as? WindowManager.LayoutParams ?: return
+            val (pw, ph) = panelSize()
+            lp.width = pw
+            lp.height = ph
+            lp.x = lp.x.coerceIn(0, (dm.widthPixels - pw).coerceAtLeast(0))
+            lp.y = lp.y.coerceIn(0, (dm.heightPixels - ph).coerceAtLeast(0))
+            safeUpdate(v, lp)
         } else {
-            // 小圆点也确保留在屏幕内
             val hv = handleView ?: return
-            val lp = hv.layoutParams as WindowManager.LayoutParams
-            val dm = resources.displayMetrics
-            lp.x = lp.x.coerceIn(0, dm.widthPixels - hv.width.coerceAtLeast(44))
-            lp.y = lp.y.coerceIn(0, dm.heightPixels - hv.height.coerceAtLeast(44))
-            runCatching { wm.updateViewLayout(hv, lp) }
+            val lp = hv.layoutParams as? WindowManager.LayoutParams ?: return
+            val handleSize = (44 * resources.displayMetrics.density).toInt()
+            lp.x = lp.x.coerceIn(0, (dm.widthPixels - handleSize).coerceAtLeast(0))
+            lp.y = lp.y.coerceIn(0, (dm.heightPixels - handleSize).coerceAtLeast(0))
+            safeUpdate(hv, lp)
         }
     }
 
@@ -139,13 +141,14 @@ class OverlayService : Service() {
         lp.gravity = Gravity.TOP or Gravity.START
         lp.x = 0; lp.y = 200
         bindDragAndClick(v, lp, onClick = { swapToPanel(lp.x, lp.y) })
-        wm.addView(v, lp)
-        handleView = v
-        expanded = false
+        if (safeAddView(v, lp)) {
+            handleView = v
+            expanded = false
+        }
     }
 
     private fun swapToPanel(x: Int, y: Int) {
-        handleView?.let { wm.removeView(it); handleView = null }
+        handleView?.let { safeRemoveView(it); handleView = null }
 
         val v = LayoutInflater.from(this).inflate(R.layout.overlay_main, null, false)
         panelView = v
@@ -161,12 +164,17 @@ class OverlayService : Service() {
         lp.y = y.coerceAtMost(dm.heightPixels - ph).coerceAtLeast(0)
 
         bindPanel(v, lp)
-        wm.addView(v, lp)
-        expanded = true
+        if (safeAddView(v, lp)) {
+            expanded = true
+        } else {
+            // 加 panel 失败,回退到小圆点
+            panelView = null; canvas = null
+            showHandle()
+        }
     }
 
     private fun swapToHandle() {
-        panelView?.let { wm.removeView(it); panelView = null }
+        panelView?.let { safeRemoveView(it); panelView = null }
         canvas = null
         showHandle()
     }
@@ -295,19 +303,31 @@ class OverlayService : Service() {
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         )
-        // 挖孔屏:让窗口延伸到 cutout 区域,与 MediaProjection 的物理坐标对齐
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            lp.layoutInDisplayCutoutMode =
-                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        // 挖孔屏:使用 SHORT_EDGES,overlay 可以延伸到 cutout 但不强制覆盖全屏
+        // (ALWAYS + NO_LIMITS 会导致在全屏游戏 immersive 下抛异常或行为异常)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             lp.layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
         return lp
+    }
+
+    // 统一包装 WindowManager 操作,避免过渡态/屏幕旋转时 BadTokenException 让服务崩
+    private fun safeAddView(v: View, lp: WindowManager.LayoutParams): Boolean {
+        return runCatching { wm.addView(v, lp) }
+            .onFailure { android.util.Log.e("tszs", "addView failed", it) }
+            .isSuccess
+    }
+    private fun safeRemoveView(v: View) {
+        runCatching { wm.removeView(v) }
+            .onFailure { android.util.Log.w("tszs", "removeView failed", it) }
+    }
+    private fun safeUpdate(v: View, lp: WindowManager.LayoutParams) {
+        runCatching { wm.updateViewLayout(v, lp) }
+            .onFailure { android.util.Log.w("tszs", "updateLayout failed", it) }
     }
 
     // ================ 动作 ================
@@ -337,7 +357,7 @@ class OverlayService : Service() {
         val lp = panel.layoutParams as WindowManager.LayoutParams
         val savedX = lp.x; val savedY = lp.y
 
-        runCatching { wm.removeView(panel) }
+        runCatching { safeRemoveView(panel) }
         panelView = null; canvas = null
 
         var bmp: Bitmap? = null
@@ -383,7 +403,7 @@ class OverlayService : Service() {
         lp.x = x.coerceAtMost(dm.widthPixels - pw).coerceAtLeast(0)
         lp.y = y.coerceAtMost(dm.heightPixels - ph).coerceAtLeast(0)
         bindPanel(v, lp)
-        wm.addView(v, lp)
+        safeAddView(v, lp)
     }
 
     private fun onRemove() {
@@ -548,7 +568,8 @@ class OverlayService : Service() {
         val img = state.currentImage ?: return
         state.deviationX = imgX + 0.5f - img.width / 2f
         state.deviationY = imgY + 0.5f - img.height / 2f
-        state.applyZoom(canvas!!.width / 2f, canvas!!.height / 2f, state.ratio)
+        // 用指针焦点作为锚点(和原 JS 一致),让找到的位置对齐到指针处
+        state.applyZoom(state.pointerFocusX, state.pointerFocusY, state.ratio)
     }
 
     private fun onSave() {
@@ -688,8 +709,8 @@ class OverlayService : Service() {
     override fun onDestroy() {
         main.removeCallbacks(ticker)
         scope.cancel()
-        handleView?.let { runCatching { wm.removeView(it) } }
-        panelView?.let { runCatching { wm.removeView(it) } }
+        handleView?.let { runCatching { safeRemoveView(it) } }
+        panelView?.let { runCatching { safeRemoveView(it) } }
         state.imgList.filterNotNull().forEach { it.recycle() }
         state.smallImg?.recycle()
         super.onDestroy()
