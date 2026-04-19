@@ -309,11 +309,13 @@ class OverlayService : Service() {
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                // FLAG_SECURE: 让本 overlay 不出现在 MediaProjection 截屏画面中
+                // 这样截屏时悬浮窗不需要隐藏/移除,保持常驻
+                WindowManager.LayoutParams.FLAG_SECURE,
             PixelFormat.TRANSLUCENT
         )
-        // 挖孔屏:使用 SHORT_EDGES,overlay 可以延伸到 cutout 但不强制覆盖全屏
-        // (ALWAYS + NO_LIMITS 会导致在全屏游戏 immersive 下抛异常或行为异常)
+        // 挖孔屏
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             lp.layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
@@ -359,25 +361,20 @@ class OverlayService : Service() {
     }
 
     private suspend fun performCapture(capturer: com.cgfz.tszs.capture.ScreenCapturer) {
-        val panel = panelView ?: return
-        val lp = panel.layoutParams as WindowManager.LayoutParams
-        val savedX = lp.x; val savedY = lp.y
-
-        runCatching { safeRemoveView(panel) }
-        panelView = null; canvas = null
+        // FLAG_SECURE 保证悬浮窗不被 MediaProjection 捕获,
+        // 因此不需要 removeView / 移出屏幕,直接截即可
+        state.setPrompt("截屏中…")
+        canvas?.invalidate()
 
         var bmp: Bitmap? = null
         var err: String? = null
         try {
             bmp = withContext(Dispatchers.IO) {
-                kotlinx.coroutines.delay(180)
                 capturer.captureFreshBitmap(3000L)
             }
         } catch (t: Throwable) {
             err = t.message ?: t.javaClass.simpleName
         }
-
-        rebuildPanel(savedX, savedY)
 
         if (bmp != null) {
             state.acceptCapture(bmp)
@@ -392,24 +389,8 @@ class OverlayService : Service() {
             refreshSlots()
             state.setPrompt("截屏完成 ${bmp.width}×${bmp.height}")
         } else {
-            state.setPrompt("截屏失败:$err")
+            state.setPrompt("截屏失败:$err · 回主界面重新授权可恢复")
         }
-    }
-
-    /** 重新 inflate 并 addView 主面板(因为 onCapture 中 remove 了) */
-    private fun rebuildPanel(x: Int, y: Int) {
-        val (pw, ph) = panelSize()
-        val dm = resources.displayMetrics
-        val v = LayoutInflater.from(this).inflate(R.layout.overlay_main, null, false)
-        panelView = v
-        canvas = v.findViewById(R.id.canvas)
-        canvas!!.state = state
-        val lp = makeLP(pw, ph)
-        lp.gravity = Gravity.TOP or Gravity.START
-        lp.x = x.coerceAtMost(dm.widthPixels - pw).coerceAtLeast(0)
-        lp.y = y.coerceAtMost(dm.heightPixels - ph).coerceAtLeast(0)
-        bindPanel(v, lp)
-        safeAddView(v, lp)
     }
 
     private fun onRemove() {
